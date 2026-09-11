@@ -5,6 +5,10 @@ matching the pushed tag as that GitHub release's notes, so add an entry here bef
 
 ## Unreleased
 
+## 0.1.16
+
+- Added optional Clawdian plugin-tool registration for reading, adding, replying to, editing, resolving/reopening, and deleting comment threads. Uses native editor/file mutation paths with revision conflicts, agent attribution, and unload/reload cleanup.
+
 ## 0.1.15
 
 - Fixed emoji reactions added to a reply being attached to the first comment in the thread. Reply reactions now remain with the thread entry where they were added, while existing reaction data remains compatible.

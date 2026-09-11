@@ -181,7 +181,7 @@ Enable **Use author colors** in **Settings → Document Comments** to reveal the
 
 Document Comments does not scan the vault for authors while **Use author colors** is off. Enabling it starts a local scan and assigns colors to existing comment authors; saved mappings apply immediately, and newly discovered authors appear as the scan completes. It uses a 12-color Radix palette without repeating a color until every palette color is in use. Generated and custom assignments are stored locally in the plugin's `data.json`; they do not change the Markdown comment format and do not need to be shared with collaborators.
 
-Document Comments locally scans Markdown files for its comment markers to build the author-color list. Note contents never leave the device, and only author names and color assignments are stored in plugin data.
+Document Comments locally scans Markdown files for its comment markers to build the author-color list. This indexing stays on the device, and only author names and color assignments are stored in plugin data. The optional Clawdian integration described below can expose comment data to an agent.
 
 Resolved highlights keep the creator's color as a dashed underline. Creators whose highlights are no longer present remain listed under **Not currently found**, so their color returns if their comments reappear.
 
@@ -197,6 +197,43 @@ Mobile uses a dialog for new comments. The stored comment format stays the same 
 
 ## Agent support
 
+### Clawdian tools (this fork)
+
+This fork optionally integrates with [Clawdian](https://github.com/Chemiseblanc/clawdian)'s
+version-1 plugin tool API. Install builds of both plugins containing this integration and enable
+them in the same vault. Either load order works; disabling or reloading either plugin unregisters
+or restores the tools automatically. Document Comments remains usable without Clawdian.
+
+Agents using Clawdian's host-tool-enabled Claude, Copilot, OMP, or OpenCode executions receive:
+
+| Tool | Operation |
+| --- | --- |
+| `plugin_document_comments_comments_list` | Read threads, anchors, entries, reactions, status, and the note's revision |
+| `plugin_document_comments_comments_add` | Add a non-empty comment to an exact source selection |
+| `plugin_document_comments_comments_reply` | Append an agent-authored reply |
+| `plugin_document_comments_comments_set_status` | Resolve or reopen a thread |
+| `plugin_document_comments_comments_edit` | Replace a zero-based thread entry |
+| `plugin_document_comments_comments_delete` | Delete a thread while preserving the selected note text |
+
+Every call takes a vault-relative Markdown `path`. List first, then supply its `revision` as
+`expectedRevision` on a mutation; successful mutations return the next revision. Adding also
+requires `from`/`to` UTF-16 source offsets and `expected`, the exact selected source text.
+Existing threads are addressed by `id`; edit additionally takes `index`, and status takes
+`status: "open"` or `"resolved"`. Add, reply, and edit take `text`.
+
+The tools use the same parser and edit primitives as the UI. Open notes are read and changed
+through the live editor, preserving unsaved text and undo history; closed notes use Obsidian's
+atomic file-processing API. Revisions are checked against fresh content before applying changes.
+On a `conflict` error, list and read the note again rather than reusing stale offsets or revisions.
+New comments and replies are attributed to `claudian_<providerId>`, not the configured human
+author. Empty-text add is rejected, so it cannot accidentally delete an existing highlight.
+
+Listing is read-only; mutations follow Clawdian's tool policies, with deletion classified as
+destructive. Codex, Grok, and Pi currently lack this host-tool bridge. Enabling the integration
+allows agents to read comment data and modify notes; see Privacy below.
+
+### Format skill
+
 This repository includes an agent skill for the Document Comments format:
 
 ```text
@@ -211,7 +248,10 @@ python3 skills/document-comments/scripts/validate_comments.py path/to/file.md
 
 ## Privacy
 
-The plugin does not use the network, telemetry, or accounts. It stores all comment data in the note.
+The plugin itself does not use the network, telemetry, or accounts. It stores all comment data
+in the note. When Clawdian is also enabled, registered tools expose comment data to the selected
+agent provider; that provider may send tool results to its model service. Clawdian's execution
+policy controls tool availability. Disable either plugin to remove this integration.
 
 ## Roadmap
 

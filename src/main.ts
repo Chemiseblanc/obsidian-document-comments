@@ -10,6 +10,7 @@ import {
 	TFile,
 	WorkspaceLeaf,
 	debounce,
+	type EventRef,
 } from "obsidian";
 import { Result } from "better-result";
 import { EditorView } from "@codemirror/view";
@@ -42,6 +43,8 @@ import {
 import { createAuthorIndex, type AuthorIndex, type AuthorIndexState } from "./author-index";
 import { loadSettingsData, saveSettingsData } from "./settings-storage";
 import { isHtmlElement } from "./util/dom";
+import { registerCommentTools } from "./claudian-tools";
+import type { ClaudianPluginToolApi } from "./claudian-tools";
 
 type AuthorColorStateSnapshot = {
 	assignment: AuthorColorAssignment | undefined;
@@ -63,6 +66,8 @@ export default class DocCommentsPlugin extends Plugin {
 	private scheduleAuthorColorSave = debounce(() => void this.persistAuthorColors(), 100, true);
 	/** True while the "All discussions" sidebar panel is mounted. */
 	private sidebarOpen = false;
+	private unregisterClaudianTools: (() => void) | null = null;
+	private claudianToolsApi: ClaudianPluginToolApi | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -227,9 +232,53 @@ export default class DocCommentsPlugin extends Plugin {
 		);
 		this.updateRibbon();
 		this.addRibbonIcon("messages-square", "Open comments sidebar", () => void this.activateSidebar());
-
 		this.settingsTab = new DocCommentsSettingTab(this.app, this);
 		this.addSettingTab(this.settingsTab);
+		this.setupClaudianIntegration();
+	}
+
+	private setupClaudianIntegration(): void {
+		const workspace = this.app.workspace as typeof this.app.workspace & {
+			on(name: string, callback: (api: ClaudianPluginToolApi) => void): EventRef;
+		};
+		this.registerEvent(
+			workspace.on("clawdian:tools-ready", (api) => {
+				this.registerClaudianTools(api);
+			}),
+		);
+		this.registerEvent(
+			workspace.on("clawdian:tools-disposing", (api) => {
+				if (api === this.claudianToolsApi) this.unregisterClaudianToolsNow();
+			}),
+		);
+
+		const plugins = (
+			this.app as unknown as {
+				plugins?: { getPlugin(id: string): { api?: ClaudianPluginToolApi } | null | undefined };
+			}
+		).plugins;
+		const claudian = plugins?.getPlugin("clawdian");
+		if (claudian?.api) this.registerClaudianTools(claudian.api);
+	}
+
+	private registerClaudianTools(api: ClaudianPluginToolApi): void {
+		if (!api || api.version !== 1 || typeof api.registerTools !== "function") return;
+		if (this.claudianToolsApi === api) return;
+		this.unregisterClaudianToolsNow();
+		try {
+			this.claudianToolsApi = api;
+			this.unregisterClaudianTools = registerCommentTools(this.app, this, api);
+		} catch {
+			this.claudianToolsApi = null;
+			this.unregisterClaudianTools = null;
+			new Notice("Could not register agent comment tools.");
+		}
+	}
+
+	private unregisterClaudianToolsNow(): void {
+		this.unregisterClaudianTools?.();
+		this.unregisterClaudianTools = null;
+		this.claudianToolsApi = null;
 	}
 
 	private startAddComment(editor: Editor): void {
@@ -483,6 +532,7 @@ export default class DocCommentsPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.unregisterClaudianToolsNow();
 		this.readingManager?.destroy();
 		this.unsubscribeAuthorIndex?.();
 		this.authorIndex?.dispose();
